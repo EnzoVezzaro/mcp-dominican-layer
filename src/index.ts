@@ -2,7 +2,7 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import * as dotenv from 'dotenv';
-import { Request, Response } from 'express';
+import { legalResources, legalArticles, legalPrecedents } from "./legal-resources.js";
 
 dotenv.config();
 
@@ -11,34 +11,6 @@ const server = new McpServer({
   name: "Dominican Legal MCP",
   version: "1.0.0"
 });
-
-// Legal resources data
-const legalResources: Record<string, string[]> = {
-  "constitution": [
-    "https://www.dominicana.gob.do/index.php/recursos/2014-12-16-21-02-56/category/3-constitucion-y-leyes-rd",
-    "https://www.presidencia.gob.do/constitucion"
-  ],
-  "civil_code": [
-    "https://www.oas.org/dil/esp/Código%20Civil%20de%20la%20República%20Dominicana.pdf",
-    "https://www.poderjudicial.gob.do/documentos/PDF/codigos/Codigo_Civil.pdf"
-  ],
-  "penal_code": [
-    "https://www.oas.org/juridico/spanish/mesicic3_rep_cod_penal.pdf",
-    "https://www.poderjudicial.gob.do/documentos/PDF/codigos/Codigo_Penal.pdf"
-  ],
-  "labor_code": [
-    "https://www.mt.gob.do/images/docs/biblioteca/codigo_de_trabajo.pdf",
-    "https://www.poderjudicial.gob.do/documentos/PDF/codigos/Codigo_Trabajo.pdf"
-  ],
-  "commercial_code": [
-    "https://www.poderjudicial.gob.do/documentos/PDF/codigos/Codigo_Comercio.pdf",
-    "https://www.dgii.gov.do/legislacion/comercio/Documents/Codigo_Comercio.pdf"
-  ],
-  "tax_code": [
-    "https://dgii.gov.do/legislacion/codigoTributario/Documents/Titulo1.pdf",
-    "https://www.dgii.gov.do/legislacion/Documents/Codigo_Tributario_2023.pdf"
-  ]
-};
 
 // Register legal research tool
 server.tool("dominican-legal-research", 
@@ -91,12 +63,6 @@ server.tool("dominican-legal-research",
         });
       }
     }
-    
-    // const debugInfo = { // Removed debug info
-    //   receivedQuery: query,
-    //   normalizedQuery: normalizedQuery,
-    //   keywords: keywords,
-    // };
 
     return {
       content: [{
@@ -111,18 +77,62 @@ server.tool("dominican-legal-research",
 server.tool("legal-case-analysis",
   { caseDetails: z.string() },
   async ({ caseDetails }) => {
+    const details = caseDetails.toLowerCase();
+    const isContract = details.includes("contract") || details.includes("obligation");
+    const isProperty = details.includes("property") || details.includes("real estate");
+    const isPrivacy = details.includes("privacy") || details.includes("data");
+    const isExpression = details.includes("expression") || details.includes("speech");
+
+    let relevantArticles: Array<{number: string, url: string}> = [];
+    let relevantPrecedents: Array<{
+      case: string;
+      title: string;
+      url: string;
+      summary: string;
+      year?: number;
+    }> = [];
+    let analysis = "General legal analysis";
+
+    if (isContract) {
+      relevantArticles = Object.entries(legalArticles.civil_code)
+        .filter(([num]) => ['1101','1183','1219'].includes(num))
+        .map(([number, url]) => ({ number, url }));
+      relevantPrecedents = legalPrecedents.supreme_court
+        .filter(p => p.title.includes("Contract"));
+      analysis = "Contractual dispute under Dominican Civil Code";
+    } 
+    else if (isProperty) {
+      relevantArticles = Object.entries(legalArticles.civil_code)
+        .filter(([num]) => ['1382','1467'].includes(num))
+        .map(([number, url]) => ({ number, url }));
+      relevantPrecedents = legalPrecedents.supreme_court
+        .filter(p => p.title.includes("Property"));
+      analysis = "Property rights case under Dominican Civil Code";
+    }
+    else if (isPrivacy) {
+      relevantArticles = Object.entries(legalArticles.constitution)
+        .filter(([num]) => ['37','44'].includes(num))
+        .map(([number, url]) => ({ number, url }));
+      relevantPrecedents = legalPrecedents.constitutional_court
+        .filter(p => p.title.includes("Privacy"));
+      analysis = "Privacy rights case under Dominican Constitution";
+    }
+    else if (isExpression) {
+      relevantArticles = Object.entries(legalArticles.constitution)
+        .filter(([num]) => ['49','55'].includes(num))
+        .map(([number, url]) => ({ number, url }));
+      relevantPrecedents = legalPrecedents.constitutional_court
+        .filter(p => p.title.includes("Expression"));
+      analysis = "Freedom of expression case under Dominican Constitution";
+    }
+
     return {
       content: [{
         type: "text",
         text: JSON.stringify({
-          analysis: "This case appears to involve contractual disputes under Dominican Civil Code.",
-          relevant_articles: ["Articles 1101-1167 of the Dominican Civil Code"],
-          precedents: [{
-            case: "SCJ-PS-22-0123",
-            court: "Suprema Corte de Justicia",
-            summary: "Breach of contract case establishing burden of proof requirements",
-            date: "2022-03-15"
-          }],
+          analysis,
+          relevantArticles,
+          relevantPrecedents,
           timestamp: new Date().toISOString()
         }, null, 2)
       }]
@@ -150,6 +160,69 @@ server.tool("legal-document-generator",
         text: JSON.stringify({
           document_type: documentType,
           template,
+          timestamp: new Date().toISOString()
+        }, null, 2)
+      }]
+    };
+  }
+);
+
+// Register document search tool
+server.tool("legal-document-search-extract",
+  { 
+    searchTerm: z.string().min(1)
+  },
+  async ({ searchTerm }) => {
+    const normalizedQuery = searchTerm.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const keywords = normalizedQuery.split(/\s+/);
+    const results: Array<{resourceType: string, urls: string[]}> = [];
+    
+    for (const keyword of keywords) {
+      if (keyword.includes("constitucion") || keyword.includes("constitucional")) {
+        results.push({
+          resourceType: "constitution",
+          urls: legalResources["constitution"]
+        });
+      } 
+      if (keyword.includes("civil")) {
+        results.push({
+          resourceType: "civil_code",
+          urls: legalResources["civil_code"]
+        });
+      }
+      if (keyword.includes("penal") || keyword.includes("criminal")) {
+        results.push({
+          resourceType: "penal_code", 
+          urls: legalResources["penal_code"]
+        });
+      }
+      if (keyword.includes("laboral") || keyword.includes("trabajo")) {
+        results.push({
+          resourceType: "labor_code",
+          urls: legalResources["labor_code"]
+        });
+      }
+      if (keyword.includes("comercio") || keyword.includes("comercial")) {
+        results.push({
+          resourceType: "commercial_code",
+          urls: legalResources["commercial_code"]
+        });
+      }
+      if (keyword.includes("tributario") || keyword.includes("impuesto")) {
+        results.push({
+          resourceType: "tax_code",
+          urls: legalResources["tax_code"]
+        });
+      }
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          searchTerm,
+          results,
+          instruction: "Please analyze these legal documents and extract relevant information matching the search term",
           timestamp: new Date().toISOString()
         }, null, 2)
       }]
