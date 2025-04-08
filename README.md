@@ -38,14 +38,14 @@ This MCP server provides access to information about the Dominican Congress, inc
 
 ## Installation
 
-1.  Clone this repository: `git clone https://github.com/EnzoVezzaro/dominicans-mcp.git`
-2.  Navigate to the repository directory: `cd dominicans-mcp`
+1.  Clone this repository: `git clone https://github.com/EnzoVezzaro/mcp-dominican-layer.git`
+2.  Navigate to the repository directory: `cd mcp-dominican-layer`
 3.  Install the dependencies: `npm install`
 4.  Build the project: `npm run build`
 
 ## Integrating into your MCP Client
 
-These steps assume you are using the [dominicans-mcp](https://github.com/EnzoVezzaro/dominicans-mcp) client.
+These steps assume you are using the [mcp-dominican-layer](https://github.com/EnzoVezzaro/mcp-dominican-layer.git) client.
 
 1.  **Configure the MCP Server:**
     *   Open your MCP client's configuration file (likely `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` or `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS).
@@ -101,6 +101,17 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 We welcome contributions to this project! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute.
 
+## Author
+
+Enzo Vezzaro
+
+## GitHub Repository
+
+[https://github.com/EnzoVezzaro/mcp-dominican-layer](https://github.com/EnzoVezzaro/mcp-dominican-layer)
+
+If you'd like to contribute to this project, please submit a pull request!
+
 ## Reporting Issues
 
-Please report any issues you encounter on the [issue tracker](https://github.com/EnzoVezzaro/dominicans-mcp/issues).
+Please report any issues you encounter on the [issue tracker](https://github.com/EnzoVezzaro/mcp-dominican-layer/issues).
+

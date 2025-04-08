@@ -5,7 +5,7 @@
   "description": "MCP server for Dominican legal assistance",
   "main": "build/index.js",
   "scripts": {
-    "build": "tsc && chmod 755 build/index.js && echo '\\nMCP Configuration (add this to your settings):\\n{\\n  \"dominican-congress\": {\\n    \"command\": \"node\",\\n    \"args\": [\"/Users/mac/Desktop/Github/mcp-dominican-layer/build/index.js\"],\\n    \"env\": {}\\n  }\\n}'",
+    "build": "tsc && chmod 755 build/index.js && echo '\\nAuthor: Enzo Vezzaro\\nGitHub: https://github.com/EnzoVezzaro/dominicans-mcp\\nMCP Configuration (add this to your settings):\\n{\\n  \"dominican-congress\": {\\n    \"command\": \"node\",\\n    \"args\": [\"/Users/mac/Desktop/Github/mcp-dominican-layer/build/index.js\"],\\n    \"env\": {}\\n  }\\n}'",
     "start": "node build/index.js",
     "dev": "tsx watch src/index.ts",
     "test": "jest"
