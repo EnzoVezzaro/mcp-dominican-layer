@@ -5,7 +5,7 @@
   "description": "MCP server for Dominican legal assistance",
   "main": "build/index.js",
   "scripts": {
-    "build": "tsc && chmod 755 build/index.js",
+    "build": "tsc && chmod 755 build/index.js && echo '\\nMCP Configuration (add this to your settings):\\n{\\n  \"dominican-congress\": {\\n    \"command\": \"node\",\\n    \"args\": [\"/Users/mac/Desktop/Github/mcp-dominican-layer/build/index.js\"],\\n    \"env\": {}\\n  }\\n}'",
     "start": "node build/index.js",
     "dev": "tsx watch src/index.ts",
     "test": "jest"
@@ -21,8 +21,10 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.9.0",
+    "axios": "^1.8.4",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "puppeteer": "^24.6.0",
     "typescript": "^5.0.4"
   },
   "devDependencies": {

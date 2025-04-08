@@ -1,210 +1,128 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+// Dominican Congress Watcher - MCP Server
+// Uses TypeScript and MCP SDK to provide live updates from SenadoRD and Cámara de Diputados
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import * as dotenv from 'dotenv';
-import { legalResources, legalArticles, legalPrecedents } from "./legal-resources.js";
-dotenv.config();
+import puppeteer from "puppeteer";
 // Create the MCP server
 const server = new McpServer({
-    name: "Dominican Legal MCP",
+    name: "Dominican Congress MCP",
     version: "1.0.0"
 });
-// Register legal research tool
-server.tool("dominican-legal-research", { query: z.string() }, async ({ query }) => {
-    // console.error(`[DEBUG] Received query: ${query}`); // Removed log
-    const normalizedQuery = query.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // Normalize and remove accents
-    // console.error(`[DEBUG] Normalized query: ${normalizedQuery}`); // Removed log
-    const keywords = normalizedQuery.split(/\s+/);
-    const results = []; // Changed url to urls: string[]
-    for (const keyword of keywords) {
-        const isConstitution = keyword.includes("constitucion") || keyword.includes("constitucional");
-        // console.error(`[DEBUG] Is constitution keyword? ${isConstitution}`); // Removed log
-        if (isConstitution) { // Check against normalized keyword
-            results.push({
-                title: "Constitución de la República Dominicana",
-                urls: legalResources["constitution"], // Changed url to urls
-                relevance: "high"
-            });
-        }
-        else if (keyword.includes("civil")) {
-            results.push({
-                title: "Código Civil Dominicano",
-                urls: legalResources["civil_code"], // Changed url to urls
-                relevance: "high"
-            });
-        }
-        else if (keyword.includes("penal") || keyword.includes("criminal")) {
-            results.push({
-                title: "Código Penal Dominicano",
-                urls: legalResources["penal_code"], // Changed url to urls
-                relevance: "high"
-            });
-        }
-        else if (keyword.includes("laboral") || keyword.includes("trabajo")) {
-            results.push({
-                title: "Código de Trabajo de la República Dominicana",
-                urls: legalResources["labor_code"], // Changed url to urls
-                relevance: "high"
-            });
-        }
-        else if (keyword.includes("comercio") || keyword.includes("comercial")) {
-            results.push({
-                title: "Código de Comercio",
-                urls: legalResources["commercial_code"], // Changed url to urls
-                relevance: "high"
-            });
-        }
-        else if (keyword.includes("tributario") || keyword.includes("impuesto")) {
-            results.push({
-                title: "Código Tributario",
-                urls: legalResources["tax_code"], // Changed url to urls
-                relevance: "high"
-            });
-        }
-    }
+// Tool: Fetch Legislative Agenda
+server.tool("fetch-legislative-agenda", {
+    chamber: z.enum(["senate", "deputies"]),
+}, async ({ chamber }) => {
+    const agenda = await crawlAgenda(chamber);
     return {
-        content: [{
-                type: "text",
-                text: JSON.stringify({ results, query, timestamp: new Date().toISOString() /* Removed debug */ }, null, 2)
-            }]
+        content: [{ type: "text", text: agenda }]
     };
 });
-// Register case analysis tool
-server.tool("legal-case-analysis", { caseDetails: z.string() }, async ({ caseDetails }) => {
-    const details = caseDetails.toLowerCase();
-    const isContract = details.includes("contract") || details.includes("obligation");
-    const isProperty = details.includes("property") || details.includes("real estate");
-    const isPrivacy = details.includes("privacy") || details.includes("data");
-    const isExpression = details.includes("expression") || details.includes("speech");
-    let relevantArticles = [];
-    let relevantPrecedents = [];
-    let analysis = "General legal analysis";
-    if (isContract) {
-        relevantArticles = Object.entries(legalArticles.civil_code)
-            .filter(([num]) => ['1101', '1183', '1219'].includes(num))
-            .map(([number, url]) => ({ number, url }));
-        relevantPrecedents = legalPrecedents.supreme_court
-            .filter(p => p.title.includes("Contract"));
-        analysis = "Contractual dispute under Dominican Civil Code";
-    }
-    else if (isProperty) {
-        relevantArticles = Object.entries(legalArticles.civil_code)
-            .filter(([num]) => ['1382', '1467'].includes(num))
-            .map(([number, url]) => ({ number, url }));
-        relevantPrecedents = legalPrecedents.supreme_court
-            .filter(p => p.title.includes("Property"));
-        analysis = "Property rights case under Dominican Civil Code";
-    }
-    else if (isPrivacy) {
-        relevantArticles = Object.entries(legalArticles.constitution)
-            .filter(([num]) => ['37', '44'].includes(num))
-            .map(([number, url]) => ({ number, url }));
-        relevantPrecedents = legalPrecedents.constitutional_court
-            .filter(p => p.title.includes("Privacy"));
-        analysis = "Privacy rights case under Dominican Constitution";
-    }
-    else if (isExpression) {
-        relevantArticles = Object.entries(legalArticles.constitution)
-            .filter(([num]) => ['49', '55'].includes(num))
-            .map(([number, url]) => ({ number, url }));
-        relevantPrecedents = legalPrecedents.constitutional_court
-            .filter(p => p.title.includes("Expression"));
-        analysis = "Freedom of expression case under Dominican Constitution";
-    }
+// Tool: Get Legislator Activity
+server.tool("get-legislator-activity", {
+    name: z.string(),
+}, async ({ name }) => {
+    const summary = await getLegislatorHistory(name);
     return {
-        content: [{
-                type: "text",
-                text: JSON.stringify({
-                    analysis,
-                    relevantArticles,
-                    relevantPrecedents,
-                    timestamp: new Date().toISOString()
-                }, null, 2)
-            }]
+        content: [{ type: "text", text: summary }]
     };
 });
-// Register document generation tool
-server.tool("legal-document-generator", {
-    documentType: z.enum(["demand", "contract"]),
-    details: z.record(z.unknown())
-}, async ({ documentType, details }) => {
-    const templates = {
-        "demand": `...`, // Template content here
-        "contract": `...` // Template content here
-    };
-    const template = templates[documentType] || "Template not available";
+// Tool: Summarize Today's Legislative Activity
+server.tool("summarize-today", {}, async () => {
+    const summary = await summarizeTodayCongress();
     return {
-        content: [{
-                type: "text",
-                text: JSON.stringify({
-                    document_type: documentType,
-                    template,
-                    timestamp: new Date().toISOString()
-                }, null, 2)
-            }]
+        content: [{ type: "text", text: summary }]
     };
 });
-// Register document search tool
-server.tool("legal-document-search-extract", {
-    searchTerm: z.string().min(1)
-}, async ({ searchTerm }) => {
-    const normalizedQuery = searchTerm.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const keywords = normalizedQuery.split(/\s+/);
-    const results = [];
-    for (const keyword of keywords) {
-        if (keyword.includes("constitucion") || keyword.includes("constitucional")) {
-            results.push({
-                resourceType: "constitution",
-                urls: legalResources["constitution"]
-            });
+// Tool: Alert on New Bills
+server.tool("alert-new-bills", {}, async () => {
+    const updates = await checkNewBills();
+    return {
+        content: [{ type: "text", text: updates }]
+    };
+});
+// Resource: Daily Bulletin
+server.resource("daily-bulletin", new ResourceTemplate("bulletin://{date}", { list: undefined }), async (uri, { date }) => {
+    const bulletin = await getCongressBulletin(date);
+    return {
+        contents: [{
+                uri: uri.href,
+                text: bulletin,
+            }],
+    };
+});
+// --- Implementation Helpers ---
+async function crawlAgenda(chamber) {
+    const baseUrl = chamber === "senate"
+        ? "https://www.senadord.gob.do/orden-del-dia/"
+        : "https://camaradediputados.gob.do/";
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(baseUrl, { waitUntil: 'networkidle0' }); // Wait for network activity to cease
+    // Get main page text
+    let mainText = await page.evaluate(() => document.body.innerText);
+    // Find PDF links
+    const pdfLinks = await page.$$eval('a[href$=".pdf"]', (links, pageUrl) => links.map(link => ({
+        href: new URL(link.getAttribute('href') || '', pageUrl).href, // Resolve relative URLs
+        name: link.textContent?.trim() || link.getAttribute('href')?.split('/').pop() || 'unknown.pdf' // Get name from text or filename
+    })), baseUrl); // Pass baseUrl to resolve relative URLs correctly
+    let pdfContentText = "";
+    // Download and parse PDFs
+    for (const link of pdfLinks) {
+        try {
+            console.log(`Fetching PDF: ${link.href}`);
+            // const response = await axios.get(link.href, { responseType: 'arraybuffer' });
+            // const data = await pdf.default(response.data); // Use .default with namespace import
+            // console.log(`Parsed PDF: ${link.name}`);
+            // Sanitize PDF text slightly (replace multiple newlines/spaces)
+            // const parsedPdf = data.text.replace(/(\s*\n){3,}/g, '\n\n').replace(/ {2,}/g, ' ');
+            pdfContentText += `\n\n--- PDF Content: ${link.name} ---\n\n--- End PDF: ${link.name} ---\n`;
         }
-        if (keyword.includes("civil")) {
-            results.push({
-                resourceType: "civil_code",
-                urls: legalResources["civil_code"]
-            });
-        }
-        if (keyword.includes("penal") || keyword.includes("criminal")) {
-            results.push({
-                resourceType: "penal_code",
-                urls: legalResources["penal_code"]
-            });
-        }
-        if (keyword.includes("laboral") || keyword.includes("trabajo")) {
-            results.push({
-                resourceType: "labor_code",
-                urls: legalResources["labor_code"]
-            });
-        }
-        if (keyword.includes("comercio") || keyword.includes("comercial")) {
-            results.push({
-                resourceType: "commercial_code",
-                urls: legalResources["commercial_code"]
-            });
-        }
-        if (keyword.includes("tributario") || keyword.includes("impuesto")) {
-            results.push({
-                resourceType: "tax_code",
-                urls: legalResources["tax_code"]
-            });
+        catch (error) {
+            console.error(`Error processing PDF ${link.name} (${link.href}): ${error.message}`);
+            pdfContentText += `\n\n--- Error processing PDF: ${link.name} (${link.href}) ---`;
         }
     }
-    return {
-        content: [{
-                type: "text",
-                text: JSON.stringify({
-                    searchTerm,
-                    results,
-                    instruction: "Please analyze these legal documents and extract relevant information matching the search term",
-                    timestamp: new Date().toISOString()
-                }, null, 2)
-            }]
-    };
-});
-// Start the server
-const PORT = process.env.PORT || 8000;
+    await browser.close();
+    const combinedText = `Resume la agenda legislativa del siguiente texto extraído del sitio web del congreso (${chamber}):\n\n${mainText}${pdfContentText}`;
+    return combinedText;
+}
+async function getLegislatorHistory(name) {
+    const url = `https://www.camaradediputados.gob.do/\nhttps://www.senadord.gob.do/`;
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(url);
+    const text = await page.evaluate(() => document.body.innerText);
+    await browser.close();
+    return `Busca toda la información sobre la actividad reciente del legislador o legisladora llamado/a ${name} y resumenla de forma clara y cronológica:\n\n${text}`;
+}
+async function summarizeTodayCongress() {
+    const senate = await crawlAgenda("senate");
+    const deputies = await crawlAgenda("deputies");
+    const fullText = `Agenda Senado:\n${senate}\n\nAgenda Diputados:\n${deputies}`;
+    return `Resume el trabajo legislativo del día a partir del siguiente texto combinado del Senado y Cámara de Diputados:\n\n${fullText}`;
+}
+async function checkNewBills() {
+    const url = "http://www.senado.gov.do/wfilemaster/lista_expedientes.aspx?coleccion=53";
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(url);
+    const text = await page.evaluate(() => document.body.innerText);
+    await browser.close();
+    return `Busca y resume cualquier propuesta de ley nueva publicada recientemente en el siguiente texto:\n\n${text}`;
+}
+async function getCongressBulletin(date) {
+    const url = `https://www.senadord.gob.do/orden-del-dia/`; // Placeholder
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(url);
+    const text = await page.evaluate(() => document.body.innerText);
+    await browser.close();
+    return `Extrae y resume el boletín legislativo del día ${date} del siguiente contenido web:\n\n${text}`;
+}
+const PORT = process.env.PORT || 8089;
 const transport = new StdioServerTransport();
 server.connect(transport).then(() => {
-    console.log(`Dominican Legal MCP server running on port ${PORT}`);
+    console.log(`Dominican Congress MCP server running on port ${PORT}`);
 });
 export default server;
