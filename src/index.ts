@@ -7,6 +7,8 @@ import { z } from "zod";
 import puppeteer from "puppeteer";
 import axios from "axios";
 import pdf from 'pdf-parse/lib/pdf-parse.js';
+import { parse as csvParse } from 'csv-parse';
+import * as xlsx from 'xlsx';
 
 // Create the MCP server
 const server = new McpServer({
@@ -16,7 +18,7 @@ const server = new McpServer({
 
 // Tool: Fetch Legislative Agenda
 server.tool("fetch-legislative-agenda", {
-  chamber: z.enum(["senate", "deputies"]),
+  chamber: z.enum(["senado", "diputados"]),
 }, async ({ chamber }) => {
   const agenda = await crawlAgenda(chamber);
   return {
@@ -42,9 +44,11 @@ server.tool("summarize-today", {}, async () => {
   };
 });
 
-// Tool: Alert on New Bills
-server.tool("alert-new-bills", {}, async () => {
-  const updates = await checkNewBills();
+// Tool: New Bills
+server.tool("new bills", {
+  chamber: z.enum(["senado", "diputados"]),
+}, async ({ chamber }) => {
+  const updates = await checkNewBills(chamber);
   return {
     content: [{ type: "text", text: updates }]
   };
@@ -64,6 +68,79 @@ server.tool("parse-pdf", {
     console.error(`Error processing PDF ${pdfUrl}: ${error.message}`);
     return {
       content: [{ type: "text", text: `Error processing PDF: ${error.message}` }],
+      isError: true
+    };
+  }
+});
+
+// Tool: Datos Abiertos
+server.tool("datos-abiertos", {
+  q: z.string().optional(),
+  organization: z.string().optional(),
+  tags: z.string().optional(),
+  groups: z.string().optional(),
+  skip: z.string().optional(),
+}, async ({ q, organization, tags, groups, skip }) => {
+  const url = `https://datos.gob.do/api/datasets?q=${q || ''}&organization=${organization || ''}&tags=${tags || ''}&groups=${groups || ''}&skip=${skip || ''}`;
+  try {
+    const response = await axios.get(url);
+    const data = response.data;
+    return {
+      content: [{ type: "text", text: JSON.stringify(data, null, 2) }]
+    };
+  } catch (error: any) {
+    console.error(`Error obteniendo datos abiertos: ${error.message}`);
+    return {
+      content: [{ type: "text", text: `Error obteniendo datos abiertos: ${error.message}` }],
+      isError: true
+    };
+  }
+});
+
+// Tool: Parse CSV
+server.tool("parse-csv", {
+  csvUrl: z.string().url()
+}, async ({ csvUrl }) => {
+  try {
+    const response = await axios.get(csvUrl, { responseType: 'stream' });
+    const records: any[] = [];
+    const parser = response.data.pipe(csvParse({
+      delimiter: ',',
+      columns: true,
+      skip_empty_lines: true
+    }));
+    for await (const record of parser) {
+      records.push(record);
+    }
+    return {
+      content: [{ type: "text", text: JSON.stringify(records, null, 2) }]
+    };
+  } catch (error: any) {
+    console.error(`Error procesando CSV ${csvUrl}: ${error.message}`);
+    return {
+      content: [{ type: "text", text: `Error procesando CSV: ${error.message}` }],
+      isError: true
+    };
+  }
+});
+
+// Tool: Parse XLSX
+server.tool("parse-xlsx", {
+  xlsxUrl: z.string().url()
+}, async ({ xlsxUrl }) => {
+  try {
+    const response = await axios.get(xlsxUrl, { responseType: 'arraybuffer' });
+    const workbook = xlsx.read(response.data, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const jsonData = xlsx.utils.sheet_to_json(worksheet);
+    return {
+      content: [{ type: "text", text: JSON.stringify(jsonData, null, 2) }]
+    };
+  } catch (error: any) {
+    console.error(`Error procesando XLSX ${xlsxUrl}: ${error.message}`);
+    return {
+      content: [{ type: "text", text: `Error procesando XLSX: ${error.message}` }],
       isError: true
     };
   }
@@ -133,15 +210,37 @@ async function summarizeTodayCongress(): Promise<string> {
   return `Resume el trabajo legislativo del día a partir del siguiente texto combinado del Senado y Cámara de Diputados:\n\n${fullText}`;
 }
 
-async function checkNewBills(): Promise<string> {
-  const url = "http://www.senado.gov.do/wfilemaster/lista_expedientes.aspx?coleccion=53";
-  const browser = await puppeteer.launch({ headless: true });
-  const page = await browser.newPage();
-  await page.goto(url);
-  const text = await page.evaluate(() => document.body.innerText);
-  await browser.close();
+async function checkNewBills(chamber: string): Promise<string> {
+  const baseUrl = chamber === "senate"
+    ? "http://www.senado.gov.do/wfilemaster/lista_expedientes.aspx?coleccion=53"
+    : "https://camaradediputados.gob.do/";
 
-  return `Busca y resume cualquier propuesta de ley nueva publicada recientemente en el siguiente texto:\n\n${text}`;
+  try {
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+
+    await page.setExtraHTTPHeaders({
+      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'accept-encoding': 'gzip, deflate',
+      'accept-language': 'en-GB,en;q=0.8',
+      'cache-control': 'no-cache',
+      'connection': 'keep-alive',
+      'host': 'www.senado.gov.do',
+      'pragma': 'no-cache',
+      'sec-gpc': '1',
+      'upgrade-insecure-requests': '1',
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36'
+    });
+
+    await page.goto(baseUrl);
+    const text = await page.evaluate(() => document.body.innerText);
+    await browser.close();
+
+    return `Busca y resume cualquier propuesta de ley nueva publicada recientemente en el siguiente texto:\n\n${text}`;
+  } catch (error: any) {
+    console.error(`Error obteniendo nuevas leyes: ${error.message}`);
+    return `Error obteniendo nuevas leyes: ${error.message}`;
+  }
 }
 
 async function getCongressBulletin(date: string): Promise<string> {
